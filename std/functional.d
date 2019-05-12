@@ -1120,36 +1120,48 @@ Note:
     always return the same result for a given tuple of arguments. However, `memoize` does not
     enforce that because sometimes it is useful to memoize an impure function, too.
 */
-template memoize(alias fun)
+struct memoize(alias fun)
 {
     import std.traits : ReturnType;
-    // alias Args = Parameters!fun; // Bugzilla 13580
+    import std.typecons : Tuple;
 
-    ReturnType!fun memoize(Parameters!fun args)
+    alias Args = Parameters!fun;
+
+    private static ReturnType!fun[Tuple!Args] memo;
+
+    // does not work because of bug https://issues.dlang.org/show_bug.cgi?id=18289
+    static ReturnType!fun opCall(Args args)
     {
-        alias Args = Parameters!fun;
-        import std.typecons : Tuple;
-
-        static ReturnType!fun[Tuple!Args] memo;
         auto t = Tuple!Args(args);
         if (auto p = t in memo)
             return *p;
         return memo[t] = fun(args);
     }
+
+    static void clear()
+    {
+        memo.clear();
+    }
 }
 
 /// ditto
-template memoize(alias fun, uint maxSize)
+struct memoize(alias fun, uint maxSize)
 {
     import std.traits : ReturnType;
-    // alias Args = Parameters!fun; // Bugzilla 13580
-    ReturnType!fun memoize(Parameters!fun args)
+    alias Args = Parameters!fun;
+
+    private static struct Value { Args args; ReturnType!fun res; }
+    private static Value[] memo;
+    private static size_t[] initialized;
+
+    static void clear()
+    {
+      // XXX todo
+    }
+
+    static ReturnType!fun opCall(Args args)
     {
         import std.traits : hasIndirections;
-        import std.typecons : tuple;
-        static struct Value { Parameters!fun args; ReturnType!fun res; }
-        static Value[] memo;
-        static size_t[] initialized;
 
         if (!memo.length)
         {
@@ -1374,6 +1386,29 @@ template memoize(alias fun, uint maxSize)
     assert(firstClass(new Bar(3)).k == 3);
     assert(firstClass(new Bar(3)).k == 3);
     assert(executed == 1);
+}
+
+// 19859: memoize can be cleared
+@safe unittest
+{
+    int executed = 0;
+    ulong identity(ulong n) @safe
+    {
+        executed++;
+        return n;
+    }
+    alias memoized = memoize!identity;
+
+    assert(memoized(42) == 42);
+    assert(memoized(3) == 3);
+    assert(executed == 2);
+
+    assert(memoized(42) == 42);
+    assert(executed == 2);
+
+    memoized.clear();
+    assert(memoized(42) == 42);
+    assert(executed == 3);
 }
 
 private struct DelegateFaker(F)
